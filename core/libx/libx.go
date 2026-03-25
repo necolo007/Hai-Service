@@ -16,9 +16,12 @@ func GetUsername(c *gin.Context) string {
 	return username
 }
 
+// HTTPStatusKey 与 ResponseMiddleware 约定：只写入 context，不要调用 c.Status。
+// 若此处调用 c.Status，会触发 WriteHeader，导致 Gin 认为响应已写出，统一 JSON 中间件会跳过，客户端收到空 body。
+const HTTPStatusKey = "http_status"
+
 func Code(c *gin.Context, code int) {
-	// 设置 HTTP 状态码
-	c.Status(code)
+	c.Set(HTTPStatusKey, code)
 }
 
 func Msg(c *gin.Context, msg string) {

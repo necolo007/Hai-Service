@@ -28,7 +28,8 @@ type PictureConfig struct {
 }
 
 type JWTConfig struct {
-	Secret string `mapstructure:"secret"`
+	Secret      string `mapstructure:"secret"`
+	AccessHours int    `mapstructure:"access_hours"` // 访问令牌有效期（小时），0 表示使用默认 24
 }
 
 type MySQLConfig struct {

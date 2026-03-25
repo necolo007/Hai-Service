@@ -171,5 +171,6 @@ func AutoMigrateAll(db any) error {
 	// 把需要迁移的表都放这里
 	return gdb.AutoMigrate(
 		&domain.Picture{},
+		&domain.User{},
 	)
 }

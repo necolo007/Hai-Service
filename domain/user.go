@@ -1,17 +1,23 @@
 package domain
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 type User struct {
-	ID       uint
-	Username string
-	Email    string
-	Password string
+	ID           uint      `gorm:"primaryKey;autoIncrement" json:"id"`
+	Username     string    `gorm:"size:64;uniqueIndex;not null" json:"username"`
+	Email        string    `gorm:"size:255;uniqueIndex;not null" json:"email"`
+	PasswordHash string    `gorm:"size:255;not null" json:"-"`
+	Role         string    `gorm:"size:32;default:user;not null" json:"role"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
 }
 
 type UserRepository interface {
-	Create(c context.Context, user *User) error
-	Fetch(c context.Context) ([]User, error)
-	GetByEmail(c context.Context, email string) (User, error)
-	GetByID(c context.Context, id string) (User, error)
+	Create(ctx context.Context, user *User) error
+	GetByEmail(ctx context.Context, email string) (*User, error)
+	GetByUsername(ctx context.Context, username string) (*User, error)
+	GetByID(ctx context.Context, id uint) (*User, error)
 }

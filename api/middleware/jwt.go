@@ -3,6 +3,7 @@ package middleware
 import (
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v4"
@@ -12,6 +13,23 @@ var Secret []byte
 
 func InitSecret(secret string) {
 	Secret = []byte(secret)
+}
+
+// SignToken 签发访问令牌（HS256）。
+func SignToken(userID uint, username, role string, ttl time.Duration) (string, error) {
+	now := time.Now()
+	claims := Claims{
+		UserID:   userID,
+		Username: username,
+		Role:     role,
+		RegisteredClaims: jwt.RegisteredClaims{
+			IssuedAt:  jwt.NewNumericDate(now),
+			ExpiresAt: jwt.NewNumericDate(now.Add(ttl)),
+			NotBefore: jwt.NewNumericDate(now),
+		},
+	}
+	t := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	return t.SignedString(Secret)
 }
 
 type Claims struct {

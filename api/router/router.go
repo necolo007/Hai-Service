@@ -14,7 +14,13 @@ func GenerateRouter(r *gin.Engine) {
 		})
 	})
 
-	g1 := r.Group("/api")
+	auth := controller.NewAuthController()
+	auth.RegisterPublic(r.Group("/api"))
+
+	protected := r.Group("/api")
+	protected.Use(middleware.JWTAuthMiddleware())
+	auth.RegisterProtected(protected)
+
 	pic := controller.NewPictureController()
-	pic.Register(g1)
+	pic.Register(protected)
 }

@@ -5,6 +5,7 @@ import (
 	"Hai-Service/core/gin"
 	"context"
 	"errors"
+	"fmt"
 	"github.com/fatih/color"
 	"github.com/spf13/viper"
 
@@ -18,7 +19,7 @@ import (
 func main() {
 	handler := gin.GinInit()
 	srv := &http.Server{
-		Addr:    config.GetConfig().App.URL,
+		Addr:    fmt.Sprintf(":%s", config.GetConfig().App.Port),
 		Handler: handler,
 	}
 	//启动服务器
