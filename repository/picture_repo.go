@@ -19,10 +19,10 @@ func (r *PictureRepo) Create(ctx context.Context, p *domain.Picture) error {
 	return r.db.WithContext(ctx).Create(p).Error
 }
 
-func (r *PictureRepo) GetByID(ctx context.Context, id int64) (*domain.Picture, error) {
-	var p domain.Picture
-	if err := r.db.WithContext(ctx).First(&p, id).Error; err != nil {
+func (r *PictureRepo) GetByUserID(ctx context.Context, userID int64) ([]*domain.Picture, error) {
+	var pics []*domain.Picture
+	if err := r.db.WithContext(ctx).Where("user_id = ?", userID).Order("id DESC").Find(&pics).Error; err != nil {
 		return nil, err
 	}
-	return &p, nil
+	return pics, nil
 }

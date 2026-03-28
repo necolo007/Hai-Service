@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -42,6 +43,8 @@ func (c *DashScopeI2IClient) Generate(ctx context.Context, req domain.GenerateIm
 		ImageBase64:    req.ImageBase64,
 		Model:          req.Model,
 		Prompt:         req.Prompt,
+		ScenePrompt:    req.ScenePrompt,
+		EffectPrompt:   req.EffectPrompt,
 		Size:           req.Size,
 		Seed:           req.Seed,
 		NegativePrompt: req.NegativePrompt,
@@ -95,9 +98,17 @@ type i2iGetResp struct {
 	Output struct {
 		TaskStatus string `json:"task_status"`
 		TaskID     string `json:"task_id"`
+		Code       string `json:"code"`    // 任务失败时的错误码
+		Message    string `json:"message"` // 任务失败时的错误信息
 		Results    []struct {
-			URL string `json:"url"`
+			URL  string `json:"url"`
+			Code string `json:"code"`
 		} `json:"results"`
+		TaskMetrics struct {
+			Total     int `json:"TOTAL"`
+			Succeeded int `json:"SUCCEEDED"`
+			Failed    int `json:"FAILED"`
+		} `json:"task_metrics"`
 	} `json:"output"`
 	RequestID string `json:"request_id"`
 	Code      string `json:"code"`
@@ -125,6 +136,8 @@ func (c *DashScopeI2IClient) CreateTask(ctx context.Context, req I2ICreateTaskRe
 	if err != nil {
 		return "", err
 	}
+
+	log.Printf("[dashscope] create task: model=%s prompt=%q size=%s", req.Model, req.Input.Prompt, req.Params.Size)
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpoint, bytes.NewReader(b))
 	if err != nil {
@@ -196,7 +209,13 @@ func (c *DashScopeI2IClient) GetTask(ctx context.Context, taskID string) (string
 			urls = append(urls, r.URL)
 		}
 	}
-	return out.Output.TaskStatus, urls, out.RequestID, nil
+
+	// 把任务级错误附加到返回值，让调用方能拿到失败原因
+	var taskErr error
+	if out.Output.TaskStatus == "FAILED" && (out.Output.Code != "" || out.Output.Message != "") {
+		taskErr = fmt.Errorf("task failed: [%s] %s", out.Output.Code, out.Output.Message)
+	}
+	return out.Output.TaskStatus, urls, out.RequestID, taskErr
 }
 
 func (c *DashScopeI2IClient) PollUntilDone(ctx context.Context, taskID string, interval, timeout time.Duration) ([]string, string, error) {
@@ -214,9 +233,10 @@ func (c *DashScopeI2IClient) PollUntilDone(ctx context.Context, taskID string, i
 	defer t.Stop()
 
 	for {
-		status, urls, requestID, err := c.GetTask(ctx, taskID)
-		if err != nil {
-			return nil, requestID, err
+		status, urls, requestID, taskErr := c.GetTask(ctx, taskID)
+		if taskErr != nil {
+			log.Printf("[dashscope] task %s error: %v", taskID, taskErr)
+			return nil, requestID, taskErr
 		}
 
 		switch status {
@@ -226,7 +246,9 @@ func (c *DashScopeI2IClient) PollUntilDone(ctx context.Context, taskID string, i
 			}
 			return urls, requestID, nil
 		case "FAILED", "CANCELED", "UNKNOWN":
-			return nil, requestID, fmt.Errorf("task %s status %s", taskID, status)
+			err := fmt.Errorf("task %s status %s", taskID, status)
+			log.Printf("[dashscope] %v", err)
+			return nil, requestID, err
 		}
 
 		select {
@@ -250,7 +272,9 @@ type FivePackResult struct {
 type FivePackInput struct {
 	ImageBase64    string
 	Model          string
-	Prompt         string
+	Prompt         string // 白底/透明图基础描述（后端自动构建 prompt）
+	ScenePrompt    string // 场景图用户描述（scene1/scene2 共用）
+	EffectPrompt   string // 效果图用户描述
 	Size           string
 	Seed           *int
 	NegativePrompt string
@@ -258,17 +282,33 @@ type FivePackInput struct {
 	Watermark      bool
 }
 
-func BuildFivePrompts(userPrompt string) (white, transparent, scene1, scene2, effect string) {
-	base := userPrompt
-	if base == "" {
-		base = "保持主体清晰，细节真实，风格一致"
+const defaultBase = "保持主体清晰，细节真实，风格一致"
+
+func buildBase(s string) string {
+	if s == "" {
+		return defaultBase
 	}
-	white = base + "，商品白底图，纯白背景，正面居中，高质感棚拍光，无多余道具，无文字无水印"
-	transparent = base + "，主体抠图效果，透明背景，边缘干净，无阴影底板，无背景元素"
-	scene1 = base + "，真实生活场景展示，光线自然，背景与主体协调，不遮挡主体，无文字无水印"
-	scene2 = base + "，电商风场景展示，氛围感布光，突出主体卖点，背景简洁不抢主体，无文字无水印"
-	effect = base + "，功效展示图，突出使用效果前后对比或功效表达，画面简洁，信息图风格但不要文字，无水印"
-	return
+	return s
+}
+
+func BuildWhitePrompt(base string) string {
+	return buildBase(base) + "，商品白底图，纯白背景，正面居中，高质感棚拍光，无多余道具，无文字无水印"
+}
+
+func BuildTransparentPrompt(base string) string {
+	return buildBase(base) + "，主体抠图效果，透明背景，边缘干净，无阴影底板，无背景元素"
+}
+
+func BuildScene1Prompt(scenePrompt string) string {
+	return buildBase(scenePrompt) + "，真实生活场景展示，光线自然，背景与主体协调，不遮挡主体，无文字无水印"
+}
+
+func BuildScene2Prompt(scenePrompt string) string {
+	return buildBase(scenePrompt) + "，高质感电商陈列场景，单主体，单场景，浅色干净背景，柔和布光，构图稳定，突出商品本体与材质细节，可搭配少量真实道具但不喧宾夺主，不做拼贴，不做多宫格，不出现人物手部，不出现文字、数字、logo、水印"
+}
+
+func BuildEffectPrompt(effectPrompt string) string {
+	return buildBase(effectPrompt) + "，卖点氛围图，通过光效、材质特写、局部动态元素或真实使用线索来表达产品优势，画面简洁高级，主体突出，禁止海报排版，禁止信息图，禁止对比拼图，禁止箭头、图标、标签、说明框，禁止任何文字、数字、字母、水印，避免生成无意义字符"
 }
 
 // GenerateFivePack 固定生成 5 张：白底、透明、场景1、场景2、功效。
@@ -289,18 +329,16 @@ func GenerateFivePack(ctx context.Context, cli *DashScopeI2IClient, in FivePackI
 		model = "wan2.5-i2i-preview"
 	}
 
-	whiteP, transP, scene1P, scene2P, effP := BuildFivePrompts(in.Prompt)
-
 	type job struct {
 		name   string
 		prompt string
 	}
 	jobs := []job{
-		{name: "white", prompt: whiteP},
-		{name: "transparent", prompt: transP},
-		{name: "scene1", prompt: scene1P},
-		{name: "scene2", prompt: scene2P},
-		{name: "effect", prompt: effP},
+		{name: "white", prompt: BuildWhitePrompt(in.Prompt)},
+		{name: "transparent", prompt: BuildTransparentPrompt(in.Prompt)},
+		{name: "scene1", prompt: BuildScene1Prompt(in.ScenePrompt)},
+		{name: "scene2", prompt: BuildScene2Prompt(in.ScenePrompt)},
+		{name: "effect", prompt: BuildEffectPrompt(in.EffectPrompt)},
 	}
 
 	taskIDByName := make(map[string]string, len(jobs))

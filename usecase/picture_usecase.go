@@ -16,8 +16,11 @@ func NewPictureUsecase(repo domain.PictureRepository, generator domain.ImageGene
 }
 
 type GeneratePictureInput struct {
+	UserID         int64
 	ImageBase64    string
-	Prompt         string
+	Prompt         string // 白底/透明图基础描述
+	ScenePrompt    string // 场景图用户描述
+	EffectPrompt   string // 效果图用户描述
 	NegativePrompt string
 	Size           string
 	PromptExtend   bool
@@ -44,6 +47,8 @@ func (u *PictureUsecase) GenerateAndSave(ctx context.Context, in GeneratePicture
 		ImageBase64:    in.ImageBase64,
 		Model:          model,
 		Prompt:         in.Prompt,
+		ScenePrompt:    in.ScenePrompt,
+		EffectPrompt:   in.EffectPrompt,
 		NegativePrompt: in.NegativePrompt,
 		Size:           size,
 		PromptExtend:   in.PromptExtend,
@@ -54,9 +59,30 @@ func (u *PictureUsecase) GenerateAndSave(ctx context.Context, in GeneratePicture
 		return nil, nil, err
 	}
 
+	fp := res.FivePack
+	var whiteBG, transparent, scene1, scene2, effectImage string
+	if fp != nil {
+		whiteBG = fp.WhiteBG
+		transparent = fp.Transparent
+		if len(fp.SceneImages) > 0 {
+			scene1 = fp.SceneImages[0]
+		}
+		if len(fp.SceneImages) > 1 {
+			scene2 = fp.SceneImages[1]
+		}
+		effectImage = fp.EffectImage
+	}
+
 	p := &domain.Picture{
-		Prompt:   in.Prompt,
-		ImageURL: res.ImageURL, // 固定保存白底图
+		UserID:       in.UserID,
+		Prompt:       in.Prompt,
+		ScenePrompt:  in.ScenePrompt,
+		EffectPrompt: in.EffectPrompt,
+		WhiteBG:      whiteBG,
+		Transparent:  transparent,
+		Scene1:       scene1,
+		Scene2:       scene2,
+		EffectImage:  effectImage,
 	}
 	if err := u.repo.Create(ctx, p); err != nil {
 		return nil, nil, err
@@ -64,6 +90,6 @@ func (u *PictureUsecase) GenerateAndSave(ctx context.Context, in GeneratePicture
 	return p, res, nil
 }
 
-func (u *PictureUsecase) GetByID(ctx context.Context, id int64) (*domain.Picture, error) {
-	return u.repo.GetByID(ctx, id)
+func (u *PictureUsecase) GetByUserID(ctx context.Context, userID int64) ([]*domain.Picture, error) {
+	return u.repo.GetByUserID(ctx, userID)
 }
